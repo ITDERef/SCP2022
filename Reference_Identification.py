@@ -5,11 +5,8 @@
 #Version:1.0.0
 #CreateTime:xxxx-xx-xx
 #====#====#====#====
-
-#导入库
 import re
 import time
-#导入pymongo库
 from pymongo import MongoClient
 import requests
 import itertools
@@ -19,27 +16,22 @@ global SIGN
 SIGN = False
 
 '''
-功能：从ghtorrent平台存储的github数据中提取引用
-步骤：
-1. 依次遍历每个文档中的"body"信息，使用正则表达式'(.+?)/(.+?)[#@](.+?)'检查文本信息是否满足3种匹配模式的条件
-2. 针对满足条件的文档，抽取数据：user、repo等
-3. 遍历数据库直到结束
+function:extract links in Bson files from ghtorrent
 '''
 def link_extraction():
-    # 连接MongoDB数据库-默认链接
+    # connect MongoDB database
     client = MongoClient(unicode_decode_error_handler='ignore')
-    # 连接数据库ghtorrent
     db = client.ghtorrent
-    # 打开集合
+    # open collection
     coll_input = db['input']
-    # 新建集合
+    # new collection
     coll_output = db['output']
 
-    # 正则表达式
+    # Building regular expression
     target1 = 'github.com/(.+?)/(.+?)'
     target2 = '(.+?)/(.+?)#(\d+)'
     target3 = '(.+?)/(.+?)@([a-zA-Z0-9]+)'
-    # 预先编译
+    # pre-compile
     pattern1 = re.compile(target1)
     pattern2 = re.compile(target2)
     pattern3 = re.compile(target3)
@@ -54,11 +46,8 @@ def link_extraction():
             SIGN = False
             str_body = cursor['body']
             sign_num = pattern_num + 1
-            # 满足条件，向下继续执行
             idx = 0
-            # 'body'字符串切分
             list_body = str_body.split()
-            # 针对每一个子字符串
             for str_full in list_body:
                 num_re = -1
                 if sign_num == 1:
@@ -82,7 +71,7 @@ def link_extraction():
                     except:
                         continue
             if SIGN:
-                # 提取当前文档的源repo及其他相关信息
+                # extract information
                 d['type'] = sign_num
                 d['sourceId'] = cursor['_id']
                 d['updated_at'] = cursor['updated_at']
@@ -97,7 +86,7 @@ def link_extraction():
     return
 
 def AnalysisData(str_full, sign_num, idx, d):
-    global SIGN  # 函数中声明全局变量
+    global SIGN
     if sign_num == 1:
         list_http = str_full.split("/")
         num_len = len(list_http)
@@ -125,7 +114,6 @@ def AnalysisData(str_full, sign_num, idx, d):
                     break
             i = i + 1
     if sign_num == 2:
-        # 对#切片
         list_j = str_full.split("#")
         if list_j:
             str_xg = list_j[0]
@@ -138,7 +126,6 @@ def AnalysisData(str_full, sign_num, idx, d):
                 d['target_org' + num_idx] = usr + '/' + repo
                 d['sample' + num_idx] = str_full
     if sign_num == 3:
-        # 对@切片
         list_j = str_full.split("@")
         if list_j:
             str_xg = list_j[0]
@@ -153,23 +140,21 @@ def AnalysisData(str_full, sign_num, idx, d):
     return d
 
 '''
-功能：识别项目名称的修改
-步骤1：提取所有的项目
-步骤2：判断每个项目是否有跳转现象，若有则保存新的项目名称
-步骤3：把跳转后的项目名称同一修改为跳转前的项目名称
+Function: Identify changes to project names
+Step 1: Extract names for all projects
+Step 2: Determine whether the name of each project change. Save the new project name when projecte's name change
+Step 3: Replace the old name with the new one
 '''
 def identify_redirectedProjects():
-    # 提取所有的项目
     idx = 0
     sum = 0
     dict = {}
     dataset = set([])
     f = open('dataset.txt', 'a+')
-    # 连接MongoDB数据库-默认链接
+    # connect MongoDB database
     client = MongoClient(unicode_decode_error_handler='ignore')
-    # 连接数据库ghtorrent
     db = client.ghtorrent
-    # 打开集合
+    # open collection
     coll_input = db['input']
     for cursor in coll_input.find({}, no_cursor_timeout=True, batch_size=100):
         ID = cursor['_id']
@@ -191,16 +176,15 @@ def identify_redirectedProjects():
                     f.write(target)
                     idx += 1
         sum += 1
-        print('遍历数据表：', sum)
+        print('traverse tha database：', sum)
     f.close()
-    print('数据库遍历完成')
-    print('项目总数为：', idx)
-    #判断每个项目是否有跳转现象，若有则保存新的项目名称
-    # 读取项目
+    print('The database traversal is complete~')
+    print('Total number of projects is：', idx)
+    #Step 2
     file = open('repos.txt', 'r', encoding='utf-8')
     data_list = file.readlines()
     file.close()
-    # 依次爬取项目网址
+    # Crawl the project url
     for str in data_list:
         repo = str[:-1]
         repo_list = siteCrawl(repo)
@@ -212,9 +196,8 @@ def identify_redirectedProjects():
         if newname != None:
             dict['new_name'] = repo_list['new_name']
         dict['crawler'] = True
-        # 连接MongoDB数据库-默认链接
+        # connect MongoDB database
         client = MongoClient(unicode_decode_error_handler='ignore')
-        # 连接数据库ghtorrent
         db = client.ghtorrent
         coll_redirected = db['redirected_projects']
         coll_redirected.insert_one(dict)
@@ -222,15 +205,15 @@ def identify_redirectedProjects():
     return
 
 def replaceNewName():
-    # 把跳转后的项目名称同一修改为跳转前的项目名称
+    # Step 3
     rdictlist = []
     olddict = {}
     newdict = {}
     dict = {}
-    # 连接MongoDB数据库-默认链接
+    # connect MongoDB database
     client = MongoClient(unicode_decode_error_handler='ignore')
-    # 连接数据库ghtorrent
     db = client.ghtorrent
+    # open collection
     coll_redirected = db['redirected_projects']
     coll_input = db['input']
     coll_output = db['output']
@@ -280,7 +263,7 @@ def siteCrawl(full_name):
             html = response_dict['html_url']
             mylist = html.split('/')
             new_name = mylist[3] + '/' + mylist[4]
-        else:#在当前状态码下，令新旧项目名一致
+        else:
             new_name = full_name
         redirection = 'False'
         if new_name != full_name:
@@ -303,19 +286,12 @@ def combinedict(name, olddict, newdict):
         dict['new_name'] = ret
     return dict
 
-'''依赖项目对提取步骤：
-#1.过滤项目对
-    #1.1.过滤虚假的引用项目
-    #1.2.过滤相同的项目对（内部调用）
-#2.在repos中提取（去除fork项目）
-    #2.1.判断源项目是否存在
-    #2.2.判断目标项目是否存在
-'''
+'''Filter project pairs'''
 def filter_references():
-    # 连接MongoDB数据库-默认链接
+    # connect MongoDB database
     client = MongoClient(unicode_decode_error_handler='ignore')
-    # 连接数据库ghtorrent
     db = client.ghtorrent
+    # open collection
     coll_input = db['input']
     coll_output = db['output']
     for cursor in coll_input.find({}, no_cursor_timeout=True, batch_size=1000):
@@ -327,14 +303,12 @@ def filter_references():
             re = key.find("target_org")
             if re != -1:
                 target_org = cursor[key]
-                # 过滤字符串
                 target_org_new = filtration(target_org)
-                # 剔除相同的引用项目和源项目对
                 if target_org_new != source_org:
                     bSign = True
                     d[key] = target_org_new
         if bSign:
-            # orgin:来源（pullr、pullr_c、issue、issue_c、commit、commit_c）
+            # orgin:（pullr、pullr_c、issue、issue_c、commit、commit_c）
             orign = "pullr"
             d['orgin'] = orign
             d['source_org'] = source_org
@@ -348,64 +322,53 @@ def filter_references():
             elif (orign == "commit") or (orign == "issue_c"):
                 d['url'] = cursor['url']
             coll_output.insert_one(d)
-    # 查看引用项目是否真实存在
     search_repos()
     return
 
 def filtration(target_org):
     target_org_new = ""
-    # 符合条件的字符串中只可能包含一个'/'
     xg_num = target_org.count('/')
     if xg_num != 1:
         return target_org_new
-    # 用户名和项目名不能为空，即'/'不能在首位和尾部
     bool_s = target_org.startswith('/')
     bool_e = target_org.endswith('/')
     if bool_s:
         return target_org_new
     if bool_e:
         return target_org_new
-    #开始处理
     xg_num = target_org.find('/')
-    #第一步：判断用户名是否满足条件(只能包含数字、字母或单个连字符”-”（"_”也不行），且连字符”-”不能在开头和结尾)
-    #截取“user”字符串，然后翻转字符串，从左向右查找第一个非数字、字母及"-"的字符，将该部分字符串再次翻转后即为有效用户名
     tmp = target_org[0:xg_num]
     nixu_user = tmp[::-1]
     num = 0
     for letter in nixu_user:
         if (letter.isalnum()) or (letter == '-'):
-            num += 1 # +1的目的是取下一个字符
+            num += 1
         else:
-            num -= 1  # -1的目的是取上一个字符
+            num -= 1
             break
     nixu_user = nixu_user[0:num + 1]
-    #截取后的用户名不能为空
     if nixu_user == "":
         return target_org_new
     user = nixu_user[::-1]
-    # 第二步：判断项目名是否满足条件(除数字、字母外只能包含点“.”以及连字符”-”或”_”(不限开头和结尾))
-    # 截取“repo”字符串，从左向右查找第一个不是数字、字母、"-"、"_"以及"."的字符，将该部分字符串即为有效项目名
     tmp_repo = target_org[xg_num+1:]
     idx = 0
     for letter in tmp_repo:
         if (letter.isalnum()) or (letter == '-') or (letter == '_') or (letter == '.'):
-            idx += 1# +1的目的是取下一个字符
+            idx += 1
         else:
-            idx -= 1# -1的目的是取上一个字符
+            idx -= 1
             break
     repo = tmp_repo[0:idx + 1]
-    # 截取后的项目名不能为空
     if repo != "":
         target_org_new = user + '/' + repo
     return target_org_new
 
 '''
-查看引用项目是否真实存在
+Determine whether the target projects actually exist
 '''
 def search_repos():
     file = '‪./repos.txt'
     data_set = set([])
-    # 读取文件中的repo
     f = open(file, 'r', encoding='utf-8')
     data = [1]
     while data:
@@ -413,12 +376,12 @@ def search_repos():
         data = data[:-1]
         data_set.add(data)
     f.close()
-    # 连接MongoDB数据库-默认链接
+    # connect MongoDB database
     client = MongoClient(unicode_decode_error_handler='ignore')
-    # 连接数据库ghtorrent
     db = client.ghtorrent
-    coll = db['data']
-    coll_new = db['data_new']
+    # open collection
+    coll = db['input']
+    coll_new = db['output']
     data_set = set([])
     sum = 0
     sum_r = 0
@@ -427,7 +390,6 @@ def search_repos():
         mylist = []
         sign = False
         source_org = cursor['source_org']
-        # 先判断源项目是否存在
         sign = source_org in data_set
         if sign:
             tag = {}
@@ -435,14 +397,11 @@ def search_repos():
                 ret = key.find('target_org')
                 if ret != -1:
                     tag[key] = cursor[key]
-                    # 再判断引用项目是否存在
                     mylist.clear()
             for key in tag:
                 str = tag[key]
                 if str in data_set:
-                    # 若引用项目存在，则将对应键存储到列表中
                     mylist.append(key)
-            # 遍历完所有Repo后，判断源项目和引用项目是否存在
             if len(mylist) > 0:
                 d.clear()
                 d['_id'] = cursor['_id']
@@ -464,13 +423,13 @@ def search_repos():
                     d[x] = dic
                 coll_new.insert_one(d)
                 sum_r += 1
-                print("成功找到项目对：", sum_r)
+                print("Successfully found project pairs：", sum_r)
             else:
                 sum += 1
-                print("过滤项目对：", sum)
+                print("Filter project pairs：", sum)
         else:
             sum += 1
-            print("过滤项目对：", sum)
+            print("Filter project pairs：", sum)
         s = sum + sum_r
-        print("共处理数据条目为：", s)
+        print("The number of data processed：", s)
     return
