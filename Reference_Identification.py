@@ -11,11 +11,9 @@ import re
 import time
 #导入pymongo库
 from pymongo import MongoClient
-import openpyxl
-import json
 import requests
 import itertools
-import time
+
 
 global SIGN
 SIGN = False
@@ -33,9 +31,9 @@ def link_extraction():
     # 连接数据库ghtorrent
     db = client.ghtorrent
     # 打开集合
-    coll_input = db['data']
+    coll_input = db['input']
     # 新建集合
-    coll_output = db['new_data']
+    coll_output = db['output']
 
     # 正则表达式
     target1 = 'github.com/(.+?)/(.+?)'
@@ -109,7 +107,7 @@ def AnalysisData(str_full, sign_num, idx, d):
             sum_tmp = str_tmp.find('github.com')
             sum_api = str_tmp.find('api.github.com')
             if sum_tmp != -1:
-                if (sum_api == -1) and (num_len > i + 2):#格式为github.com
+                if (sum_api == -1) and (num_len > i + 2):
                     SIGN = True
                     usr = list_http[i + 1]
                     repo = list_http[i + 2]
@@ -117,7 +115,7 @@ def AnalysisData(str_full, sign_num, idx, d):
                     d['target_org' + num_idx] = usr + '/' + repo
                     d['sample' + num_idx] = str_full
                     break
-                elif (sum_tmp != -1) and (num_len > i + 3):#格式为api.github.com
+                elif (sum_tmp != -1) and (num_len > i + 3):
                     SIGN = True
                     usr = list_http[i + 2]
                     repo = list_http[i + 3]
@@ -160,15 +158,20 @@ def AnalysisData(str_full, sign_num, idx, d):
 步骤2：判断每个项目是否有跳转现象，若有则保存新的项目名称
 步骤3：把跳转后的项目名称同一修改为跳转前的项目名称
 '''
-def identify_redirectedProjects(coll):
+def identify_redirectedProjects():
     # 提取所有的项目
     idx = 0
     sum = 0
     dict = {}
     dataset = set([])
     f = open('dataset.txt', 'a+')
-    print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-    for cursor in coll.find({}, no_cursor_timeout=True, batch_size=100):
+    # 连接MongoDB数据库-默认链接
+    client = MongoClient(unicode_decode_error_handler='ignore')
+    # 连接数据库ghtorrent
+    db = client.ghtorrent
+    # 打开集合
+    coll_input = db['input']
+    for cursor in coll_input.find({}, no_cursor_timeout=True, batch_size=100):
         ID = cursor['_id']
         source = cursor['source_org']
         if source not in dataset:
@@ -194,7 +197,7 @@ def identify_redirectedProjects(coll):
     print('项目总数为：', idx)
     #判断每个项目是否有跳转现象，若有则保存新的项目名称
     # 读取项目
-    file = open('dataset.txt', 'r', encoding='utf-8')
+    file = open('repos.txt', 'r', encoding='utf-8')
     data_list = file.readlines()
     file.close()
     # 依次爬取项目网址
@@ -213,36 +216,44 @@ def identify_redirectedProjects(coll):
         client = MongoClient(unicode_decode_error_handler='ignore')
         # 连接数据库ghtorrent
         db = client.ghtorrent
-        coll_new = db['redirected_projects']
-        coll_new.insert_one(dict)
+        coll_redirected = db['redirected_projects']
+        coll_redirected.insert_one(dict)
+    replaceNewName()
+    return
+
+def replaceNewName():
     # 把跳转后的项目名称同一修改为跳转前的项目名称
     rdictlist = []
     olddict = {}
     newdict = {}
     dict = {}
-    coll_1 = db['data_01']
-    coll_2 = db['data_02']
-    coll_3= db['data_03']
-    for curcor in coll_1.find({}, no_cursor_timeout=True, batch_size=1000):
+    # 连接MongoDB数据库-默认链接
+    client = MongoClient(unicode_decode_error_handler='ignore')
+    # 连接数据库ghtorrent
+    db = client.ghtorrent
+    coll_redirected = db['redirected_projects']
+    coll_input = db['input']
+    coll_output = db['output']
+    for curcor in coll_redirected.find({}, no_cursor_timeout=True, batch_size=1000):
         full_name = curcor['full_name']
         new_name = curcor['new_name']
         rdictlist.append(full_name)
         rdictlist.append(new_name)
         olddict[full_name] = new_name
         newdict[new_name] = full_name
-    for curcor in coll_2.find({}, no_cursor_timeout=True, batch_size=1000):
-        source = curcor['source_org']
+    for curcor_in in coll_input.find({}, no_cursor_timeout=True, batch_size=1000):
+        source = curcor_in['source_org']
         if source in rdictlist:
             dict = combinedict(source, olddict, newdict)
             coll_3.insert_one(dict)
         else:
-            for key in curcor:
+            for key in curcor_in:
                 if key.find('target_org') != -1:
-                    dict = curcor[key]
+                    dict = curcor_in[key]
                     target = dict['full_name']
                     if target in rdictlist:
                         dict = combinedict(target, olddict, newdict)
-                        coll_3.insert_one(dict)
+                        coll_output.insert_one(dict)
     return
 
 
@@ -269,7 +280,7 @@ def siteCrawl(full_name):
             html = response_dict['html_url']
             mylist = html.split('/')
             new_name = mylist[3] + '/' + mylist[4]
-        else:#404:在当前状态码下，令新旧项目名一致
+        else:#在当前状态码下，令新旧项目名一致
             new_name = full_name
         redirection = 'False'
         if new_name != full_name:
@@ -300,8 +311,14 @@ def combinedict(name, olddict, newdict):
     #2.1.判断源项目是否存在
     #2.2.判断目标项目是否存在
 '''
-def filter_references(coll):
-    for cursor in coll.find({}, no_cursor_timeout=True, batch_size=1000):
+def filter_references():
+    # 连接MongoDB数据库-默认链接
+    client = MongoClient(unicode_decode_error_handler='ignore')
+    # 连接数据库ghtorrent
+    db = client.ghtorrent
+    coll_input = db['input']
+    coll_output = db['output']
+    for cursor in coll_input.find({}, no_cursor_timeout=True, batch_size=1000):
         source_org = cursor['source_org']
         type = cursor['type']
         bSign = False
@@ -330,10 +347,7 @@ def filter_references(coll):
                 d['html_url'] = cursor['html_url']
             elif (orign == "commit") or (orign == "issue_c"):
                 d['url'] = cursor['url']
-            coll.insert_one(d)
-            i = i + 1
-            print("文档总数为： ", i)
-            print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+            coll_output.insert_one(d)
     # 查看引用项目是否真实存在
     search_repos()
     return
