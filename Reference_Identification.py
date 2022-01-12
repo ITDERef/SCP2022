@@ -367,7 +367,7 @@ def filtration(target_org):
 Determine whether the target projects actually exist
 '''
 def search_repos():
-    file = '‪./repos.txt'
+    file = './repos.txt'
     data_set = set([])
     f = open(file, 'r', encoding='utf-8')
     data = [1]
